@@ -11,10 +11,11 @@ import           Control.Monad.Extra
 import           Data.Foldable             (fold, traverse_)
 import           Data.List                 (inits)
 import           Data.List.NonEmpty        (NonEmpty (..), nonEmpty)
+import           Data.Maybe                (catMaybes, maybeToList)
 import           Options.Applicative
 import           Prelude                   hiding (FilePath)
 import           System.Directory          (doesFileExist, getCurrentDirectory,
-                                            getDirectoryContents)
+                                            listDirectory)
 import           System.Exit               (exitFailure, exitSuccess)
 import           System.FilePath           (FilePath, splitPath, (</>))
 import           Text.Regex.Base.RegexLike (defaultCompOpt, defaultExecOpt,
@@ -24,6 +25,7 @@ import           Text.Regex.TDFA.String
 data Config = Config
   { fixedString   :: Bool
   , showDirectory :: Bool
+  , keepGoing     :: Bool
   , query         :: String
   }
 
@@ -43,9 +45,13 @@ main = do
                       exitFailure
                     Right regex -> pure $ regexMatch regex
 
-  searchAncestors match >>= \case
-    Nothing -> exitFailure
-    Just r  -> display r >> exitSuccess
+  let search = if keepGoing config
+                 then searchAllAncestors
+                 else fmap maybeToList . searchAncestors
+
+  search match >>= \case
+    [] -> exitFailure
+    xs -> traverse_ display xs >> exitSuccess
 
 fixedMatch :: String -> FilePath -> IO (Maybe (NonEmpty FilePath))
 fixedMatch f d = ifM (doesFileExist (d </> f))
@@ -54,18 +60,24 @@ fixedMatch f d = ifM (doesFileExist (d </> f))
 
 regexMatch :: Regex -> FilePath -> IO (Maybe (NonEmpty FilePath))
 regexMatch r d = do
-  matches <- filter (matchTest r) <$> getDirectoryContents d
+  matches <- filter (matchTest r) <$> listDirectory d
   pure $ nonEmpty matches
 
-searchAncestors :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
-searchAncestors f = do
-  ancestors <- reverse
+getAncestors :: IO [FilePath]
+getAncestors = reverse
                . fmap mconcat
                . tail
                . inits
                . splitPath
                <$> getCurrentDirectory
-  firstJustM (\d -> fmap (d,) <$> f d) ancestors
+
+searchAncestors :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
+searchAncestors f =
+  firstJustM (\d -> fmap (d,) <$> f d) =<< getAncestors
+
+searchAllAncestors :: (FilePath -> IO (Maybe a)) -> IO [(FilePath, a)]
+searchAllAncestors f =
+  fmap catMaybes . traverse (\d -> fmap (d,) <$> f d) =<< getAncestors
 
 options :: ParserInfo Config
 options = info (helper <*> parser) description
@@ -78,7 +90,12 @@ options = info (helper <*> parser) description
                  )
       <*> switch (fold [ long "show-directory"
                        , short 'd'
-                       , help "show the closest directory containing a match"
+                       , help "Show the closest directory containing a match"
+                       ]
+                 )
+      <*> switch (fold [ long "keep-going"
+                       , short 'k'
+                       , help "Don't stop after finding the first directory with matching files"
                        ]
                  )
       <*> argument str (fold [ metavar "PATTERN"
