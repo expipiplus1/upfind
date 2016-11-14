@@ -1,44 +1,93 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StrictData        #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Main
   ( main
   ) where
 
 import           Control.Monad.Extra
+import           Data.Foldable             (fold, traverse_)
 import           Data.List                 (inits)
-import           Data.Text                 (Text, pack)
-import qualified Data.Text.IO              as T
-import           Filesystem.Path           (FilePath, splitDirectories, (</>))
-import           Filesystem.Path.CurrentOS (encodeString, fromText)
+import           Data.List.NonEmpty        (NonEmpty (..), nonEmpty)
+import           Options.Applicative
 import           Prelude                   hiding (FilePath)
-import           System.Environment        (getArgs)
+import           System.Directory          (doesFileExist, getCurrentDirectory,
+                                            getDirectoryContents)
 import           System.Exit               (exitFailure, exitSuccess)
-import           Turtle.Prelude
+import           System.FilePath           (FilePath, splitPath, (</>))
+import           Text.Regex.Base.RegexLike (defaultCompOpt, defaultExecOpt,
+                                            matchTest)
+import           Text.Regex.TDFA.String
+
+data Config = Config
+  { fixedString   :: Bool
+  , showDirectory :: Bool
+  , query         :: String
+  }
 
 main :: IO ()
-main = getArgs >>= \case
-  [filename] ->
-    upfind (pack filename) >>= \case
-      Nothing -> exitFailure
-      Just f -> do
-        putStrLn . encodeString $ f
-        exitSuccess
-  _ -> do
-    T.putStrLn usage
-    exitFailure
+main = do
+  config <- execParser options
 
-usage :: Text
-usage = "Usage: upfind filename"
+  let display (d, fs) = if showDirectory config
+                          then putStrLn d
+                          else traverse_ (putStrLn . (d </>)) fs
 
-upfind :: Text -> IO (Maybe FilePath)
-upfind t = do
-  let f = fromText t
-      hasFile d = testfile (d </> f)
+  match <- if fixedString config
+             then pure $ fixedMatch (query config)
+             else case compile defaultCompOpt defaultExecOpt (query config) of
+                    Left err -> do
+                      putStrLn ("error compiling regex: " ++ err)
+                      exitFailure
+                    Right regex -> pure $ regexMatch regex
+
+  searchAncestors match >>= \case
+    Nothing -> exitFailure
+    Just r  -> display r >> exitSuccess
+
+fixedMatch :: String -> FilePath -> IO (Maybe (NonEmpty FilePath))
+fixedMatch f d = ifM (doesFileExist (d </> f))
+                   (pure $ Just (f :| []))
+                   (pure Nothing)
+
+regexMatch :: Regex -> FilePath -> IO (Maybe (NonEmpty FilePath))
+regexMatch r d = do
+  matches <- filter (matchTest r) <$> getDirectoryContents d
+  pure $ nonEmpty matches
+
+searchAncestors :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
+searchAncestors f = do
   ancestors <- reverse
                . fmap mconcat
                . tail
                . inits
-               . splitDirectories
-               <$> pwd
-  fmap (</> f) <$> findM hasFile ancestors
+               . splitPath
+               <$> getCurrentDirectory
+  firstJustM (\d -> fmap (d,) <$> f d) ancestors
+
+options :: ParserInfo Config
+options = info (helper <*> parser) description
+  where
+    parser = Config
+      <$> switch (fold [ long "fixed"
+                       , short 'F'
+                       , help "Match on a fixed string not a regex"
+                       ]
+                 )
+      <*> switch (fold [ long "show-directory"
+                       , short 'd'
+                       , help "show the closest directory containing a match"
+                       ]
+                 )
+      <*> argument str (fold [ metavar "PATTERN"
+                             , help "pattern to search for"
+                             ]
+                       )
+
+    description = fold
+      [ fullDesc
+      , header "upfind"
+      , progDesc "A program to search upwards for files"
+      ]
