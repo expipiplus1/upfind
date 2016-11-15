@@ -38,7 +38,7 @@ main = do
                           else traverse_ (putStrLn . (d </>)) fs
 
   match <- if fixedString config
-             then pure $ fixedMatch (query config)
+             then pure $ fmap (fmap pure) . fixedMatch (query config)
              else case compile defaultCompOpt defaultExecOpt (query config) of
                     Left err -> do
                       putStrLn ("error compiling regex: " ++ err)
@@ -53,15 +53,31 @@ main = do
     [] -> exitFailure
     xs -> traverse_ display xs >> exitSuccess
 
-fixedMatch :: String -> FilePath -> IO (Maybe (NonEmpty FilePath))
+--------------------------------------------------------------------------------
+-- File matchers
+--------------------------------------------------------------------------------
+
+fixedMatch :: String -> FilePath -> IO (Maybe FilePath)
 fixedMatch f d = ifM (doesFileExist (d </> f))
-                   (pure $ Just (f :| []))
+                   (pure $ Just f)
                    (pure Nothing)
 
 regexMatch :: Regex -> FilePath -> IO (Maybe (NonEmpty FilePath))
 regexMatch r d = do
   matches <- filter (matchTest r) <$> listDirectory d
   pure $ nonEmpty matches
+
+--------------------------------------------------------------------------------
+-- searching functions
+--------------------------------------------------------------------------------
+
+searchAncestors :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
+searchAncestors f =
+  firstJustM (\d -> fmap (d,) <$> f d) =<< getAncestors
+
+searchAllAncestors :: (FilePath -> IO (Maybe a)) -> IO [(FilePath, a)]
+searchAllAncestors f =
+  fmap catMaybes . traverse (\d -> fmap (d,) <$> f d) =<< getAncestors
 
 getAncestors :: IO [FilePath]
 getAncestors = reverse
@@ -71,13 +87,10 @@ getAncestors = reverse
                . splitPath
                <$> getCurrentDirectory
 
-searchAncestors :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
-searchAncestors f =
-  firstJustM (\d -> fmap (d,) <$> f d) =<< getAncestors
 
-searchAllAncestors :: (FilePath -> IO (Maybe a)) -> IO [(FilePath, a)]
-searchAllAncestors f =
-  fmap catMaybes . traverse (\d -> fmap (d,) <$> f d) =<< getAncestors
+--------------------------------------------------------------------------------
+-- option parsing
+--------------------------------------------------------------------------------
 
 options :: ParserInfo Config
 options = info (helper <*> parser) description
@@ -90,7 +103,7 @@ options = info (helper <*> parser) description
                  )
       <*> switch (fold [ long "show-directory"
                        , short 'd'
-                       , help "Show the closest directory containing a match"
+                       , help "Show the directory containing matches instead of the matches themselves"
                        ]
                  )
       <*> switch (fold [ long "keep-going"
