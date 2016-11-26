@@ -46,8 +46,8 @@ main = do
                     Right regex -> pure $ regexMatch regex
 
   let search = if keepGoing config
-                 then searchAllAncestors
-                 else fmap maybeToList . searchAncestors
+                 then findAllAncestors
+                 else fmap maybeToList . findFirstAncestor
 
   search match >>= \case
     [] -> exitFailure
@@ -71,12 +71,12 @@ regexMatch r d = do
 -- searching functions
 --------------------------------------------------------------------------------
 
-searchAncestors :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
-searchAncestors f =
+findFirstAncestor :: (FilePath -> IO (Maybe a)) -> IO (Maybe (FilePath, a))
+findFirstAncestor f =
   firstJustM (\d -> fmap (d,) <$> f d) =<< getAncestors
 
-searchAllAncestors :: (FilePath -> IO (Maybe a)) -> IO [(FilePath, a)]
-searchAllAncestors f =
+findAllAncestors :: (FilePath -> IO (Maybe a)) -> IO [(FilePath, a)]
+findAllAncestors f =
   fmap catMaybes . traverse (\d -> fmap (d,) <$> f d) =<< getAncestors
 
 getAncestors :: IO [FilePath]
@@ -86,7 +86,6 @@ getAncestors = reverse
                . inits
                . splitPath
                <$> getCurrentDirectory
-
 
 --------------------------------------------------------------------------------
 -- option parsing
