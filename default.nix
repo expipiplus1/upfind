@@ -1,7 +1,7 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  haskellPackages = pkgs.haskell.packages.ghc801.override{
+  haskellPackages = pkgs.haskell.packages.ghc802.override{
     overrides =
       let overrideAttrs = package: newAttrs: package.override (args: args // {
               mkDerivation = expr: args.mkDerivation (expr // newAttrs);
@@ -13,7 +13,7 @@ let
  haskellPackageGen = { doFilter ? true }: src:
     let filteredSrc = builtins.filterSource (n: t: t != "unknown") src;
         package = pkgs.runCommand "default.nix" {} ''
-          ${pkgs.haskell.packages.ghc801.cabal2nix}/bin/cabal2nix \
+          ${pkgs.haskellPackages.cabal2nix}/bin/cabal2nix \
             ${if doFilter then filteredSrc else src} \
             > $out
         '';
