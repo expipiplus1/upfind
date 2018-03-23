@@ -14,7 +14,7 @@ import           Data.List.NonEmpty        (NonEmpty (..), nonEmpty)
 import           Data.Maybe                (catMaybes, maybeToList)
 import           Options.Applicative
 import           Prelude                   hiding (FilePath)
-import           System.Directory          (doesFileExist, getCurrentDirectory,
+import           System.Directory          (doesPathExist, getCurrentDirectory,
                                             listDirectory)
 import           System.Exit               (exitFailure, exitSuccess)
 import           System.FilePath           (FilePath, splitPath, (</>))
@@ -58,7 +58,7 @@ main = do
 --------------------------------------------------------------------------------
 
 fixedMatch :: String -> FilePath -> IO (Maybe FilePath)
-fixedMatch f d = ifM (doesFileExist (d </> f))
+fixedMatch f d = ifM (doesPathExist (d </> f))
                    (pure $ Just f)
                    (pure Nothing)
 
